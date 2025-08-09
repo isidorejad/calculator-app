@@ -5,6 +5,7 @@ const cors = require('cors');
 
 const authRoutes = require('./routes/auth');
 const historyRoutes = require('./routes/history');
+const profileRoutes = require('./routes/profile'); // <-- Import new route
 
 const app = express();
 app.use(cors());
@@ -13,6 +14,7 @@ app.use(express.json());
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/history', historyRoutes);
+app.use('/api/profile', profileRoutes); // <-- Use new route
 
 const PORT = process.env.PORT || 5001;
 

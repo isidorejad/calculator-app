@@ -3,52 +3,56 @@ import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
 import { Ionicons } from '@expo/vector-icons';
 import Clipboard from 'expo-clipboard';
-import React, { useState } from 'react';
-import { Alert, SafeAreaView, StyleSheet, Switch, Text, TouchableOpacity, View, ViewStyle } from 'react-native';
-// Correctly import the component AND its exported type
+import mexp from 'math-expression-evaluator'; // Import the safe math parser
+import React, { useEffect, useState } from 'react';
+import { Alert, Pressable, SafeAreaView, StyleSheet, Switch, Text, TouchableOpacity, View, ViewStyle } from 'react-native';
 import { ButtonType, CalculatorButton } from '../../components/CalculatorButton';
 
-// Define an interface for our button configuration objects.
-// This ensures that the 'type' property is always a valid ButtonType.
-interface ButtonConfig {
-  value: string;
-  type: ButtonType;
-  style?: ViewStyle;
-}
+interface ButtonConfig { value: string; type: ButtonType; style?: ViewStyle; }
 
 export default function CalculatorScreen() {
   const [display, setDisplay] = useState('0');
   const [expression, setExpression] = useState('');
+  const [realtimeResult, setRealtimeResult] = useState('');
   const [isScientific, setIsScientific] = useState(false);
-  const [justCalculated, setJustCalculated] = useState(false);
-
   const colorScheme = useColorScheme() ?? 'light';
   const theme = Colors[colorScheme];
 
-  // The 'type' parameter is now correctly typed as ButtonType, not a generic string.
+  useEffect(() => {
+    if (expression.length === 0) {
+      setRealtimeResult('');
+      return;
+    }
+    const sanitizedExpr = expression.replace(/[+\-×÷%]$/, '');
+    if (!sanitizedExpr) return;
+    
+    try {
+      const evalExpression = sanitizedExpr.replace(/×/g, '*').replace(/÷/g, '/').replace(/%/g, '/100*');
+      const result = (mexp as any).eval(evalExpression);
+      setRealtimeResult(`= ${result}`);
+    } catch {
+      // Ignore errors during typing
+    }
+  }, [expression]);
+
   const handlePress = (value: string, type: ButtonType) => {
-    if (justCalculated && type === 'number') {
-      setDisplay(value);
-      setExpression(value);
-      setJustCalculated(false);
-      return;
-    }
-    if (justCalculated && type === 'operator') {
-      setExpression(display + value);
-      setDisplay('0'); // Start new number entry after operator
-      setJustCalculated(false);
-      return;
+    if (realtimeResult.startsWith('=') && !expression.includes('+') && !expression.includes('-')) {
+        setExpression(value);
+        setDisplay(value);
+        setRealtimeResult('');
+        return;
     }
 
-    setJustCalculated(false);
-
-    if (type === 'number' || type === 'action' && value === '.') {
-      if (value === '.' && display.includes('.')) return; // Prevent multiple dots
-      setDisplay(display === '0' && value !== '.' ? value : display + value);
+    if (type === 'number' || (type === 'action' && value === '.')) {
+      if (value === '.' && display.includes('.')) return;
+      const newDisplay = display === '0' && value !== '.' ? value : display + value;
+      setDisplay(newDisplay);
       setExpression(expression + value);
     } else if (type === 'operator') {
       setDisplay('0');
-      setExpression(expression + value);
+      if (!/[+\-×÷%]$/.test(expression)) {
+        setExpression(expression + value);
+      }
     } else if (type === 'action') {
       handleAction(value);
     } else if (type === 'scientific') {
@@ -61,33 +65,27 @@ export default function CalculatorScreen() {
       case 'C':
         setDisplay('0');
         setExpression('');
+        setRealtimeResult('');
         break;
-      case '⌫': // Backspace
-        if (display.length > 1) {
-          setDisplay(display.slice(0, -1));
-        } else {
-          setDisplay('0');
-        }
-        // This backspace logic for expression is tricky; a simple slice may not be correct
-        // for multi-character results. For simplicity, we keep it this way.
+      case '⌫':
+        setDisplay(display.length > 1 ? display.slice(0, -1) : '0');
         setExpression(expression.slice(0, -1));
         break;
       case '=':
+        const expressionToSave = expression;
         try {
-          // Replace visual operators with evaluatable ones
-          const evalExpression = expression.replace(/×/g, '*').replace(/÷/g, '/');
-          // Note: eval() is powerful but can be a security risk.
-          // For a production app, a custom math expression parser is safer.
-          const result = eval(evalExpression);
-          setDisplay(String(result));
-          setExpression(String(result));
-          setJustCalculated(true);
+          const evalExpression = expression.replace(/×/g, '*').replace(/÷/g, '/').replace(/%/g, '/100*');
+          const result = (mexp as any).eval(evalExpression);
+          setDisplay(result);
+          setExpression(result);
+          setRealtimeResult(`= ${result}`);
+          saveToHistory(expressionToSave, result);
         } catch {
           setDisplay('Error');
           setExpression('');
+          setRealtimeResult('');
         }
         break;
-      // The '.' case is now handled in handlePress to combine logic
     }
   };
 
@@ -96,9 +94,9 @@ export default function CalculatorScreen() {
        const number = parseFloat(display);
        let result: number;
        switch (func) {
-         case 'sin': result = Math.sin(number * Math.PI / 180); break; // Assuming degree input
-         case 'cos': result = Math.cos(number * Math.PI / 180); break; // Assuming degree input
-         case 'tan': result = Math.tan(number * Math.PI / 180); break; // Assuming degree input
+         case 'sin': result = Math.sin(number * Math.PI / 180); break;
+         case 'cos': result = Math.cos(number * Math.PI / 180); break;
+         case 'tan': result = Math.tan(number * Math.PI / 180); break;
          case 'log': result = Math.log10(number); break;
          case 'ln': result = Math.log(number); break;
          case '√': result = Math.sqrt(number); break;
@@ -107,24 +105,20 @@ export default function CalculatorScreen() {
        }
        setDisplay(String(result));
        setExpression(String(result));
-       setJustCalculated(true);
+       setRealtimeResult(`= ${String(result)}`);
      } catch {
        setDisplay('Error');
        setExpression('');
+       setRealtimeResult('');
      }
   };
 
-  const saveToHistory = async () => {
-    if (!justCalculated || display === 'Error') {
-      return Alert.alert('Save Error', 'Only the result of a valid calculation can be saved.');
-    }
+  const saveToHistory = async (expr: string, res: string) => {
+    if (!expr || res === 'Error' || res === 'NaN') return;
     try {
-      // The expression saved is the final result, not the initial calculation string.
-      // This could be improved by storing the pre-evaluation expression state.
-      await api.post('/history', { expression, result: display });
-      Alert.alert('Success', 'Calculation saved to your history.');
+      await api.post('/history', { expression: expr, result: res });
     } catch (error) {
-      Alert.alert('Error', 'Could not save history. Please try again.');
+      console.error('Could not save history');
     }
   };
 
@@ -133,7 +127,17 @@ export default function CalculatorScreen() {
     Alert.alert('Copied!', 'Result copied to clipboard.');
   };
 
-  // This array is now strictly typed as ButtonConfig[]
+  const pasteFromClipboard = async () => {
+    const text = await Clipboard.getStringAsync();
+    const num = parseFloat(text);
+    if (!isNaN(num)) {
+      setDisplay(String(num));
+      setExpression(expression + String(num));
+    } else {
+      Alert.alert("Paste Error", "Clipboard does not contain a valid number.");
+    }
+  };
+
   const standardButtons: ButtonConfig[] = [
     { value: 'C', type: 'action' }, { value: '⌫', type: 'action' }, { value: '%', type: 'operator' }, { value: '÷', type: 'operator' },
     { value: '7', type: 'number' }, { value: '8', type: 'number' }, { value: '9', type: 'number' }, { value: '×', type: 'operator' },
@@ -142,7 +146,6 @@ export default function CalculatorScreen() {
     { value: '0', type: 'number', style: { width: 176 } }, { value: '.', type: 'action' }, { value: '=', type: 'action' },
   ];
 
-  // This array is now strictly typed as ButtonConfig[]
   const scientificButtons: ButtonConfig[] = [
     { value: 'sin', type: 'scientific' }, { value: 'cos', type: 'scientific' }, { value: 'tan', type: 'scientific' },
     { value: 'log', type: 'scientific' }, { value: 'ln', type: 'scientific' }, { value: '√', type: 'scientific' },
@@ -157,18 +160,20 @@ export default function CalculatorScreen() {
             <Switch value={isScientific} onValueChange={setIsScientific} trackColor={{true: theme.tint}}/>
           </View>
           <View style={styles.iconButtons}>
-             <TouchableOpacity onPress={saveToHistory} style={styles.iconButton}><Ionicons name="save-outline" size={24} color={theme.text} /></TouchableOpacity>
+             <TouchableOpacity onPress={pasteFromClipboard} style={styles.iconButton}><Ionicons name="clipboard-outline" size={24} color={theme.text} /></TouchableOpacity>
              <TouchableOpacity onPress={copyToClipboard} style={styles.iconButton}><Ionicons name="copy-outline" size={24} color={theme.text} /></TouchableOpacity>
           </View>
       </View>
-      <View style={styles.displayContainer}>
-        <Text style={[styles.expressionText, { color: theme.icon }]}>{expression}</Text>
+      
+      <Pressable onLongPress={copyToClipboard} style={styles.displayContainer}>
+        <Text style={[styles.expressionText, { color: theme.icon }]}>{expression || ' '}</Text>
         <Text style={[styles.displayText, { color: theme.text }]} numberOfLines={1} adjustsFontSizeToFit>{display}</Text>
-      </View>
+        <Text style={[styles.realtimeText, { color: theme.tint }]}>{realtimeResult || ' '}</Text>
+      </Pressable>
 
       <View style={styles.buttonContainer}>
         {isScientific &&
-            <View style={styles.scientificRow}>
+            <View style={[styles.scientificGrid, {backgroundColor: theme.card}]}>
                 {scientificButtons.map(b => <CalculatorButton key={b.value} {...b} onPress={handlePress} />)}
             </View>
         }
@@ -187,9 +192,10 @@ const styles = StyleSheet.create({
   iconButtons: { flexDirection: 'row', gap: 20 },
   iconButton: {},
   displayContainer: { flex: 1, justifyContent: 'flex-end', alignItems: 'flex-end', padding: 20, gap: 10 },
-  expressionText: { fontSize: 24 },
+  expressionText: { fontSize: 24, opacity: 0.7 },
   displayText: { fontSize: 72, fontWeight: '300' },
+  realtimeText: { fontSize: 32, fontWeight: '500', minHeight: 40 },
   buttonContainer: { paddingBottom: 20, paddingHorizontal: 5 },
-  scientificRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center' },
+  scientificGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', padding: 10, borderRadius: 20, marginBottom: 10 },
   standardGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center' },
 });

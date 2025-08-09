@@ -4,7 +4,9 @@ const bcrypt = require('bcryptjs');
 const UserSchema = new mongoose.Schema({
   username: { type: String, required: true, unique: true },
   password: { type: String, required: true },
-});
+  profilePictureUrl: { type: String, default: '' },
+  preferredCurrency: { type: String, default: 'USD' },
+}, { timestamps: true }); // Add timestamps for user creation date
 
 // Hash password before saving
 UserSchema.pre('save', async function(next) {
